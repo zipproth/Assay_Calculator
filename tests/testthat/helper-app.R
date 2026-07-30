@@ -1,0 +1,72 @@
+# Shared setup for the Assay Calculator test suite.
+#
+# server.R defines all of its calculation helpers at file level and only calls
+# shinyServer() at the very end, so the file can be sourced into a private
+# environment.  That gives the tests direct access to the real production code
+# without starting a Shiny session.
+
+APP_DIR <- normalizePath(file.path("..", ".."), mustWork = TRUE)
+
+app <- new.env(parent = globalenv())
+suppressWarnings(suppressMessages(
+  sys.source(file.path(APP_DIR, "server.R"), envir = app, chdir = TRUE)
+))
+
+# Build the data frame that Shiny's fileInput hands to the server, for one of
+# the example files shipped with the app.
+example_upload <- function(filename) {
+  path <- normalizePath(file.path(APP_DIR, filename), mustWork = TRUE)
+  data.frame(
+    name = filename,
+    size = file.size(path),
+    type = "",
+    datapath = path,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Default inputs for shiny::testServer() based tests.  Everything the server
+# reads has to be set explicitly, because the inputs that the app creates via
+# renderUI (dc, xlim, ylim, mean_overlay) do not exist in a headless session.
+app_inputs <- function(...) {
+  modifyList(
+    list(
+      assay_type = "1",
+      data_type = "2",
+      dc = 15,
+      exclude4max = 4,
+      file_name = TRUE,
+      mean_overlay = FALSE,
+      mean_overlay_plate = FALSE,
+      mean_overlay_WT = FALSE,
+      bar_rotation = "1",
+      bar_columns = "1",
+      graph_sorting = "1",
+      settings_mean = character(0)
+    ),
+    list(...)
+  )
+}
+
+# A fresh directory below the session temp directory, removed when R exits.
+new_temp_dir <- function() {
+  path <- tempfile("assaycalc-test-")
+  dir.create(path)
+  path
+}
+
+# A compact fingerprint of a numeric object.  Pinning these instead of whole
+# matrices keeps the expected values readable while still catching any change
+# in the numbers.
+fingerprint <- function(x) {
+  v <- as.numeric(as.matrix(x))
+  finite <- v[is.finite(v)]
+  list(
+    n = length(v),
+    n_na = sum(is.na(v)),
+    min = min(finite),
+    max = max(finite),
+    mean = mean(finite),
+    sum = sum(finite)
+  )
+}

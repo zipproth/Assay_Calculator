@@ -295,7 +295,7 @@ draw_well_plate <- function(data, empty_wells, mean_overlay, mean_overlay_plate,
 }
 ####################################################
 
-shinyServer(function(input, output){
+shinyServer(function(input, output, session){
   
   calculate_plate_mean <- reactive({
     
