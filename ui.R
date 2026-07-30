@@ -189,11 +189,13 @@ dashboardPage(skin = "green",
                 width = 3,
                 solidHeader = TRUE,
                 status = "success",
-                checkboxGroupInput("settings_mean", label = h5("General Setting"), 
+                checkboxGroupInput("settings_mean", label = h5("General Setting"),
                                    choices = list("Show SD (takes time!)" = 1)),
-                radioButtons(inputId="graph_sorting", label=h4("Sort graphs by"), 
+                radioButtons(inputId="graph_sorting", label=h4("Sort graphs by"),
                              choices = list("Elicitor" = 1, "Genotype" = 2),
-                             selected = 1)
+                             selected = 1),
+                uiOutput("ui.time_unit"),
+                uiOutput("ui.time_interval")
                 )
           )
         ),

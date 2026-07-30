@@ -47,6 +47,25 @@ area_under_curve <- function(x, y, from = min(x), to = max(x), method = "trapezo
   return(sum(diff(x) * (y[-length(y)] + y[-1]) / 2))
 }
 
+#scale and label the time axis of the kinetics plots
+
+# Calcium measurements carry their time in seconds.  ROS measurements are
+# counted in measurement points, so they can only be shown in seconds or
+# minutes once the interval between two points is known.
+scale_time_axis <- function(time, assay_type, unit, interval = 60){
+  if((assay_type != 1) && (unit == "points")){
+    return(list("time" = time, "label" = "Measurement points"))
+  }
+
+  seconds <- if(assay_type == 1) time else time * interval
+
+  if(unit == "min"){
+    return(list("time" = seconds/60, "label" = "Time [min]"))
+  }
+
+  return(list("time" = seconds, "label" = "Time [s]"))
+}
+
 #axis label for the area under the curve
 
 auc_label <- function(assay_type, method){
@@ -990,6 +1009,21 @@ shinyServer(function(input, output, session){
   })
 
   
+  # unit of the x axis of the kinetics plots; calcium measurements are shown in
+  # seconds by default, ROS measurements in measurement points
+  time_unit <- reactive({
+    if (is.null(input$time_unit)){
+      return(if (input$assay_type == 1) "s" else "points")
+    }
+    return(input$time_unit)
+  })
+
+  ros_interval <- reactive({
+    if ((is.null(input$ros_interval))||(is.na(input$ros_interval))||(input$ros_interval <= 0))
+      return(60)
+    return(input$ros_interval)
+  })
+
   mean_graphs <- reactive({
     
     plate_layout <- get_layout()$plate_layout
@@ -1026,9 +1060,13 @@ shinyServer(function(input, output, session){
       
     }
     
-    lpmax2 <- ggplot(max_lineplot, aes(x=time, y=values)) #+ 
+    time_axis <- scale_time_axis(max_lineplot$time, input$assay_type,
+                                 time_unit(), ros_interval())
+    max_lineplot$time <- time_axis$time
+
+    lpmax2 <- ggplot(max_lineplot, aes(x=time, y=values)) #+
       #scale_color_manual(values=c("navy", "red3", "deeppink1", "greenyellow", "gray20", "green4", "moccasin", "blue2", "maroon4", "turquoise4", "purple3", "pink3", "lemonchiffon2", "gray70", "tomato2", "limegreen", "salmon1", "hotpink"))
-    
+
     if(input$graph_sorting == 2){
       lpmax2 <- lpmax2 + geom_line(aes(color = elicitor)) + facet_wrap(~genotype)
       
@@ -1058,7 +1096,7 @@ shinyServer(function(input, output, session){
     }
     
     
-    lpmax2 <- lpmax2 + labs(x="", y=ylabel) + #scale_color_npg() +
+    lpmax2 <- lpmax2 + labs(x=time_axis$label, y=ylabel) + #scale_color_npg() +
       theme(legend.title=element_blank(),
                                                       panel.background = element_rect(fill = "white", colour = "grey90"),
                                                       panel.grid.major = element_line(color = "grey90"),
@@ -1378,6 +1416,26 @@ shinyServer(function(input, output, session){
     sliderInput("xlim", "x-axis limit", min = xmin, max = xlim, value = c(xmin, xlim))
   })
   
+  output$ui.time_unit <- renderUI({
+    if (input$assay_type == 1){
+      radioButtons(inputId="time_unit", label=h4("Time axis"),
+                   choices = list("Seconds" = "s", "Minutes" = "min"),
+                   selected = "s")
+    } else {
+      radioButtons(inputId="time_unit", label=h4("Time axis"),
+                   choices = list("Measurement points" = "points",
+                                  "Seconds" = "s", "Minutes" = "min"),
+                   selected = "points")
+    }
+  })
+
+  output$ui.time_interval <- renderUI({
+    if ((input$assay_type == 1)||(time_unit() == "points"))
+      return(NULL)
+    numericInput("ros_interval", "Interval between measurement points [s]",
+                 value = ros_interval(), min = 1, step = 1)
+  })
+
   output$ui.auc_range <- renderUI({
     range <- auc_time_range()
     if (is.null(range))
