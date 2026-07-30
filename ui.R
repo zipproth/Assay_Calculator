@@ -148,6 +148,34 @@ dashboardPage(skin = "green",
             )
           )
         ),
+      tabItem(tabName = "norm_data3",
+        fluidRow(
+          box(title = "Area under Curve of the Mean with SD",
+              width = 9,
+              solidHeader = TRUE,
+              status = "success",
+              plotOutput("bar_auc", height = 600)
+              ),
+          box(title = "Plot Settings",
+              width = 3,
+              solidHeader = TRUE,
+              status = "success",
+              radioButtons(inputId="auc_rotation", label=h4("Bar Rotation"),
+                           choices = list("Vertical Bars" = 1, "Horizontal Bars" = 2),
+                           selected = 1),
+              radioButtons(inputId="auc_columns", label=h4("Plot Arrangement"),
+                           choices = list("Vertical Alignment" = 1, "Horizontal Alignment" = 2),
+                           selected = 1),
+              hr(),
+              h4("Integration"),
+              uiOutput("ui.auc_range"),
+              radioButtons(inputId="auc_method", label="Method",
+                           choices = list("Trapezoidal (area over time)" = "trapezoid",
+                                          "Sum of values" = "sum"),
+                           selected = "trapezoid")
+            )
+          )
+        ),
       tabItem(tabName = "norm_data2",
           fluidRow(
             box(title = "Mean Kinetics",

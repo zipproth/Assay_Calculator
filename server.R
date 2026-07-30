@@ -12,6 +12,13 @@ library(grid)
 library(png)
 options(java.parameters = "-Xss2560k")
 
+##################### constants #####################
+
+# number of measurement points recorded before the elicitor is added, and how
+# many of them are averaged into the background of a ROS measurement
+ROS_BACKGROUND_POINTS <- 10
+ROS_BACKGROUND_USED <- 5
+
 ##################### functions #####################
 
 #normalising one well for calcium measurements
@@ -21,6 +28,109 @@ norm.well <- function(x){
   cs <- rev(cumsum(rev(x))); #cumulative sum
   xn <- x/(10*(cs))*1000; #correction factor 10 because of timepoints
   return(xn)
+}
+
+#area under one curve between two positions of the x axis
+
+# "trapezoid" integrates the curve over x, so the result carries the unit of
+# the x axis and stays correct if the measurement interval ever changes.
+# "sum" simply adds up the values inside the window.
+area_under_curve <- function(x, y, from = min(x), to = max(x), method = "trapezoid"){
+  inside <- !is.na(x) & !is.na(y) & x >= from & x <= to
+  x <- x[inside]
+  y <- y[inside]
+
+  if(length(y) == 0) return(NA_real_)
+  if(method == "sum") return(sum(y))
+  if(length(y) == 1) return(0)
+
+  return(sum(diff(x) * (y[-length(y)] + y[-1]) / 2))
+}
+
+#axis label for the area under the curve
+
+auc_label <- function(assay_type, method){
+  unit <- if(assay_type == 1) "L/Lmax" else "Relative Luminescence"
+  if(method == "sum") return(paste("Sum of", unit))
+  x_unit <- if(assay_type == 1) "s" else "measurement points"
+  return(paste(unit, "x", x_unit))
+}
+
+#area under the curve of every well, summarised per genotype and elicitor
+
+# The wells are integrated one by one so that the spread between the replicates
+# can be reported next to the mean, the same way the maxima carry their SD.
+group_auc <- function(well_values, time, raw_plate_layout, from, to,
+                      method = "trapezoid", spread = "sd"){
+  elicitors <- unique(raw_plate_layout$elicitor)
+  genotypes <- unique(raw_plate_layout$genotype)
+
+  result <- NULL
+
+  for(eli in elicitors){
+    for(gen in genotypes){
+      wells <- raw_plate_layout$well[raw_plate_layout$elicitor == eli &
+                                     raw_plate_layout$genotype == gen]
+      current_set <- well_values[colnames(well_values) %in% wells]
+      if(ncol(current_set) == 0) next
+
+      aucs <- vapply(current_set, function(values){
+        area_under_curve(time, values, from, to, method)
+      }, numeric(1))
+      aucs <- aucs[!is.na(aucs)]
+      if(length(aucs) == 0) next
+
+      current_sd <- sd(aucs)
+      if(spread == "sdom") current_sd <- current_sd/sqrt(length(aucs))
+
+      result <- rbind(result, data.frame(
+        elicitor = eli,
+        genotype = gen,
+        values = mean(aucs),
+        sd = current_sd,
+        n = length(aucs),
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+
+  if(is.null(result)) return(NULL)
+
+  result$genotype <- factor(result$genotype, levels = genotypes)
+  rownames(result) <- NULL
+  return(result)
+}
+
+#normalising the single wells of a ROS measurement
+
+# Every well is blanked with the mean of the control wells of its own genotype
+# and then corrected for its own background.  Averaging these wells per group
+# reproduces the mean curves of ROS_calculate() exactly, so the areas below are
+# calculated from the same values that are plotted.
+ros_well_values <- function(rawdata, raw_plate_layout,
+                            bg_values = ROS_BACKGROUND_POINTS,
+                            how_many_bg_values = ROS_BACKGROUND_USED){
+  wells <- raw_plate_layout$well[raw_plate_layout$well %in% colnames(rawdata)]
+  values <- rawdata[wells]
+
+  for(gen in unique(raw_plate_layout$genotype)){
+    control_wells <- raw_plate_layout$well[raw_plate_layout$genotype == gen &
+                                           raw_plate_layout$elicitor == "control"]
+    control_wells <- control_wells[control_wells %in% colnames(values)]
+    if(length(control_wells) == 0) next
+
+    blank <- rowMeans(values[control_wells])
+
+    genotype_wells <- raw_plate_layout$well[raw_plate_layout$genotype == gen]
+    genotype_wells <- genotype_wells[genotype_wells %in% colnames(values)]
+    values[genotype_wells] <- values[genotype_wells] - blank
+  }
+
+  background_rows <- (bg_values - how_many_bg_values):(bg_values - 1)
+  background <- colMeans(values[background_rows, , drop = FALSE])
+  values <- as.data.frame(sweep(as.matrix(values), 2, background))
+
+  return(values)
 }
 
 #converting raw .txt files of Luminoscan to complete dataframes
@@ -283,6 +393,7 @@ draw_well_plate <- function(data, empty_wells, mean_overlay, mean_overlay_plate,
 
 
   g <- g + ylim(0, ylim) + xlim(xlim[1], xlim[2])
+
   
   #img <- readPNG("catx3.png")
   #gg <- rasterGrob(img, interpolate=TRUE) 
@@ -292,6 +403,34 @@ draw_well_plate <- function(data, empty_wells, mean_overlay, mean_overlay_plate,
   #  g <- g + ylim(0, input$ylim)
   #}
   return(g)
+}
+
+# draw a summary bar plot with error bars
+
+# Shared by the peak maxima and the area under the curve; both show one bar per
+# elicitor, facetted by genotype.
+draw_summary_bars <- function(bar_data, header, ylabel, arrangement, rotation){
+
+  bp <- ggplot(bar_data, aes(fill=elicitor, y=values, x=elicitor)) +
+    facet_wrap(~genotype, ncol = if(arrangement == 2) 2 else 1) +
+    ggtitle(header) + theme(legend.position = "none")
+
+  if(rotation == 2){bp <- bp + coord_flip() + theme(legend.position = "none")}
+
+  bp <- bp + geom_bar(position="dodge", stat="identity")
+  bp <- bp + geom_errorbar(aes(ymin=values-sd, ymax=values+sd),
+                           width=.2,                    # Width of the error bars
+                           position=position_dodge(.9))
+
+  bp <- bp + labs(x="", y=ylabel) +
+    theme(axis.text.x = element_text(angle = 90, size = 10, vjust = 0.5),
+          legend.title=element_blank(),
+          panel.background = element_rect(fill = "white", colour = "grey90"),
+          panel.grid.major = element_line(color = "grey90"),
+          strip.background = element_rect(fill = "grey90", colour = NA),
+          panel.grid.minor = element_line(colour = "grey90", size = 0.25))
+
+  return(bp)
 }
 ####################################################
 
@@ -756,35 +895,100 @@ shinyServer(function(input, output, session){
       
     }
     
-    if (input$bar_columns == 2){
-      bpmax <- ggplot(max_barplot, aes(fill=elicitor, y=values, x=elicitor)) + facet_wrap(~genotype, ncol = 2) + ggtitle(header) + theme(legend.position = "none")
-    } else {
-      bpmax <- ggplot(max_barplot, aes(fill=elicitor, y=values, x=elicitor)) + facet_wrap(~genotype, ncol = 1) + ggtitle(header) + theme(legend.position = "none")
-      }
-    
-    if(input$bar_rotation == 2){bpmax <- bpmax + coord_flip() + theme(legend.position = "none")}
-    
-    bpmax <- bpmax + geom_bar(position="dodge", stat="identity")
-    bpmax <- bpmax + geom_errorbar(aes(ymin=values-sd, ymax=values+sd),
-                                   width=.2,                    # Width of the error bars
-                                   position=position_dodge(.9))
-    
-    
-    bpmax <- bpmax + labs(x="", y=ylabel) + #scale_fill_npg() + 
-      theme(axis.text.x = element_text(angle = 90, size = 10, vjust = 0.5),
-                                                    legend.title=element_blank(),
-                                                    panel.background = element_rect(fill = "white", colour = "grey90"),
-                                                    panel.grid.major = element_line(color = "grey90"),
-                                                    strip.background = element_rect(fill = "grey90", colour = NA),
-                                                    panel.grid.minor = element_line(colour = "grey90", size = 0.25))
-    
-   # img <- readPNG("cat2.png") 
-   # gg <- rasterGrob(img, interpolate=TRUE) 
-   # bpmax <- bpmax + annotation_custom(gg, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf)
+    bpmax <- draw_summary_bars(max_barplot, header, ylabel,
+                               input$bar_columns, input$bar_rotation)
+
     return(bpmax)
-    
+
   })
-  
+
+  # start, end and step width of the integration window, in the unit of the
+  # x axis of the respective assay
+  auc_time_range <- reactive({
+
+    data <- calculate()
+
+    if (is.null(data))
+      return(NULL)
+
+    if (input$assay_type == 1){
+      time <- data$ms_normdata$time
+      return(c(min(time), max(time), 10))
+    }
+
+    # ROS measurements are counted in measurement points, starting before the
+    # elicitor is added
+    last_point <- nrow(data$ms_rawdata) - ROS_BACKGROUND_POINTS - 1
+    return(c(-ROS_BACKGROUND_POINTS, last_point, 1))
+  })
+
+  auc_calculate <- reactive({
+
+    plate_layout <- get_layout()$plate_layout
+
+    if (is.null(plate_layout))
+      return(NULL)
+
+    raw_plate_layout <- plate_layout[,1:4]
+    raw_plate_layout <- raw_plate_layout[complete.cases(raw_plate_layout),] #delete rows with NAs
+
+    data <- calculate()
+
+    if ((is.null(data))||(is.null(input$auc_range)))
+      return(NULL)
+
+    method <- if (is.null(input$auc_method)) "trapezoid" else input$auc_method
+
+    if (input$assay_type == 1){
+      well_values <- data$ms_normdata[setdiff(names(data$ms_normdata), "time")]
+      time <- data$ms_normdata$time
+      spread <- "sd"
+    } else {
+      well_values <- ros_well_values(data$ms_rawdata, raw_plate_layout)
+      time <- seq(-ROS_BACKGROUND_POINTS,
+                  nrow(well_values) - ROS_BACKGROUND_POINTS - 1)
+      spread <- "sdom"
+      # the control wells are the blank, they carry no area of their own
+      raw_plate_layout <- raw_plate_layout[raw_plate_layout$elicitor != "control",]
+    }
+
+    auc <- group_auc(well_values, time, raw_plate_layout,
+                     from = input$auc_range[1], to = input$auc_range[2],
+                     method = method, spread = spread)
+
+    if (is.null(auc))
+      return(NULL)
+
+    output <- list("auc" = auc,
+                   "from" = input$auc_range[1],
+                   "to" = input$auc_range[2],
+                   "method" = method,
+                   "ylabel" = auc_label(input$assay_type, method))
+
+    return(output)
+
+  })
+
+  bar_plots_auc <- reactive({
+
+    complete_data <- auc_calculate()
+
+    if (is.null(complete_data))
+      return(NULL)
+
+    header <- paste0("Area under Curve (",
+                     complete_data$from, " to ", complete_data$to,
+                     if (input$assay_type == 1) " s" else " measurement points",
+                     ") with ",
+                     if (input$assay_type == 1) "SD" else "SDOM")
+
+    bpauc <- draw_summary_bars(complete_data$auc, header, complete_data$ylabel,
+                               input$auc_columns, input$auc_rotation)
+
+    return(bpauc)
+
+  })
+
   
   mean_graphs <- reactive({
     
@@ -914,6 +1118,11 @@ shinyServer(function(input, output, session){
     mean_graph <- mean_graphs()
     show(mean_graph)
   })
+
+  output$bar_auc <- renderPlot({
+    barplot <- bar_plots_auc()
+    show(barplot)
+  })
   
   output$ui.downloaddata <- renderUI({
     if (is.null(calculate())) 
@@ -933,6 +1142,8 @@ shinyServer(function(input, output, session){
       layout <- plate_layout()
       barplot <- bar_plots_max()
       mean_graph <- mean_graphs()
+      aucdata <- auc_calculate()
+      auc_plot <- bar_plots_auc()
       #writeWorksheetToFile(file, data = data$ms_normdata, sheet = "normalized data")
       fname <- paste0("norm_", gsub(unlist(strsplit(input$data_file$name, "[.]")[1])[-1], "", input$data_file$name), "xlsx")
       wb <- loadWorkbook(fname, create = TRUE)
@@ -961,6 +1172,15 @@ shinyServer(function(input, output, session){
           createSheet(wb, name = "maxima with sdom")
           writeWorksheet(wb, ROSdata$normdata_w_sd, sheet = "mean data with sdom")
           writeWorksheet(wb, ROSdata$maxima_w_sd, sheet = "maxima with sdom")
+        }
+        if(is.null(aucdata)==FALSE){
+          createSheet(wb, name = "area under curve")
+          writeWorksheet(wb, cbind(aucdata$auc,
+                                   from = aucdata$from,
+                                   to = aucdata$to,
+                                   method = aucdata$method,
+                                   unit = aucdata$ylabel),
+                         sheet = "area under curve")
         }
         if(1 %in% input$settings_data_download1){
           png("wellplot.png", width = 1200, height = 1100)
@@ -991,6 +1211,15 @@ shinyServer(function(input, output, session){
           createName(wb, name = "mean_graphs", formula = "meangraphs!$B$2")
           addImage(wb, filename = "mean_graph.png", name = "mean_graphs", originalSize = TRUE)
           file.remove("mean_graph.png")
+          if(is.null(auc_plot)==FALSE){
+            png("auc_plot.png", width = 900, height = 900)
+            invisible(print(auc_plot))
+            dev.off()
+            createSheet(wb, name = "aucbarplots")
+            createName(wb, name = "auc_bar_plots", formula = "aucbarplots!$B$2")
+            addImage(wb, filename = "auc_plot.png", name = "auc_bar_plots", originalSize = TRUE)
+            file.remove("auc_plot.png")
+          }
         }
       }
       saveWorkbook(wb)
@@ -1013,11 +1242,13 @@ shinyServer(function(input, output, session){
       platelayout <- plate_layout()
       bar_plots <- bar_plots_max()
       graph_mean <- mean_graphs()
-      
+      auc_plots <- bar_plots_auc()
+
       pdf(file, width = 29.7, height = 21.0, paper = "a4r")
       invisible(print(wellcurves))
       if (is.null(platelayout) == FALSE){invisible(print(platelayout))}
       if (is.null(bar_plots) == FALSE){invisible(print(bar_plots))}
+      if (is.null(auc_plots) == FALSE){invisible(print(auc_plots))}
       if (is.null(graph_mean) == FALSE){invisible(print(graph_mean))}
       dev.off()
       
@@ -1147,6 +1378,22 @@ shinyServer(function(input, output, session){
     sliderInput("xlim", "x-axis limit", min = xmin, max = xlim, value = c(xmin, xlim))
   })
   
+  output$ui.auc_range <- renderUI({
+    range <- auc_time_range()
+    if (is.null(range))
+      return(NULL)
+
+    label <- if (input$assay_type == 1){
+      "Integration window [s]"
+    } else {
+      "Integration window [measurement points]"
+    }
+
+    sliderInput("auc_range", label,
+                min = range[1], max = range[2],
+                value = c(range[1], range[2]), step = range[3])
+  })
+
   output$ui.settings5 <- renderUI({
     plate_layout <- get_layout()$plate_layout
     if ((is.null(plate_layout))||(input$assay_type == 2))
@@ -1160,6 +1407,7 @@ shinyServer(function(input, output, session){
     if (is.null(inputlayout)==FALSE){
       menuItem("Data Summary", tabName = "data_summary", icon = icon("area-chart"),
               menuSubItem("Mean Maxima", tabName = "norm_data1", icon = icon("bar-chart")),
+              menuSubItem("Area under Curve", tabName = "norm_data3", icon = icon("area-chart")),
               menuSubItem("Mean Kinetics", tabName = "norm_data2", icon = icon("line-chart"))
       )
     } 
