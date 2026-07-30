@@ -47,6 +47,56 @@ area_under_curve <- function(x, y, from = min(x), to = max(x), method = "trapezo
   return(sum(diff(x) * (y[-length(y)] + y[-1]) / 2))
 }
 
+#reading a reference curve from an uploaded file
+
+# The first column is the time axis, every further numeric column is a curve
+# that can be picked as the reference.  The "mean data" sheet of the Excel
+# download has exactly this shape, so a previous experiment can be used as a
+# reference without any editing.
+read_reference_file <- function(inputfile){
+
+  if (is.null(inputfile))
+    return(NULL)
+
+  extension <- tools::file_ext(inputfile[1])
+
+  if((extension == "xlsx")||(extension == "xls")){
+    reference <- readWorksheetFromFile(inputfile$datapath, sheet=1)
+  } else if (extension == "csv"){
+    reference <- read.csv(inputfile$datapath, check.names = FALSE)
+  } else {
+    return(NULL)
+  }
+
+  numeric_columns <- vapply(reference, is.numeric, logical(1))
+
+  if((ncol(reference) < 2)||(!numeric_columns[1]))
+    return(NULL)
+
+  reference <- reference[, numeric_columns, drop = FALSE]
+
+  if(ncol(reference) < 2)
+    return(NULL)
+
+  colnames(reference)[1] <- "time"
+  return(reference)
+}
+
+#the mean curves of the current plate, in the shape of a reference file
+
+plate_reference_curves <- function(complete_data, assay_type){
+
+  curves <- if(assay_type == 1) complete_data$graphs_shaped else complete_data$normdata
+
+  if (is.null(curves))
+    return(NULL)
+
+  curves <- as.data.frame(curves, check.names = FALSE, stringsAsFactors = FALSE)
+  colnames(curves)[1] <- "time"
+  rownames(curves) <- NULL
+  return(curves)
+}
+
 #scale and label the time axis of the kinetics plots
 
 # Calcium measurements carry their time in seconds.  ROS measurements are
@@ -422,6 +472,26 @@ draw_well_plate <- function(data, empty_wells, mean_overlay, mean_overlay_plate,
   #  g <- g + ylim(0, input$ylim)
   #}
   return(g)
+}
+
+# render one plot into a sheet of the Excel download
+
+add_plot_sheet <- function(wb, workdir, plot, sheet, name, width, height){
+
+  if (is.null(plot))
+    return(invisible(NULL))
+
+  image <- file.path(workdir, paste0(sheet, ".png"))
+  png(image, width = width, height = height)
+  invisible(print(plot))
+  dev.off()
+
+  createSheet(wb, name = sheet)
+  createName(wb, name = name, formula = paste0(sheet, "!$B$2"))
+  addImage(wb, filename = image, name = name, originalSize = TRUE)
+  file.remove(image)
+
+  return(invisible(NULL))
 }
 
 # draw a summary bar plot with error bars
@@ -1024,6 +1094,44 @@ shinyServer(function(input, output, session){
     return(input$ros_interval)
   })
 
+  # all curves that can be picked as a reference, either the mean curves of the
+  # current plate or the columns of an uploaded file
+  reference_curves <- reactive({
+
+    if (is.null(input$reference_source))
+      return(NULL)
+
+    if (input$reference_source == "plate"){
+      complete_data <- if (input$assay_type == 1) mean_max_calculate() else ROS_calculate()
+      if (is.null(complete_data))
+        return(NULL)
+      return(plate_reference_curves(complete_data, input$assay_type))
+    }
+
+    if (input$reference_source == "file"){
+      return(read_reference_file(input$reference_file))
+    }
+
+    return(NULL)
+  })
+
+  reference_curve <- reactive({
+
+    curves <- reference_curves()
+
+    if (is.null(curves))
+      return(NULL)
+
+    group <- input$reference_group
+
+    if ((is.null(group))||(!(group %in% colnames(curves))))
+      return(NULL)
+
+    return(data.frame(time = curves$time,
+                      values = curves[[group]],
+                      stringsAsFactors = FALSE))
+  })
+
   mean_graphs <- reactive({
     
     plate_layout <- get_layout()$plate_layout
@@ -1096,6 +1204,18 @@ shinyServer(function(input, output, session){
     }
     
     
+    reference <- reference_curve()
+
+    if(is.null(reference) == FALSE){
+      # the reference carries no elicitor and no genotype, so ggplot draws it
+      # into every facet
+      reference$time <- scale_time_axis(reference$time, input$assay_type,
+                                        time_unit(), ros_interval())$time
+      lpmax2 <- lpmax2 + geom_line(data = reference, aes(x = time, y = values),
+                                   inherit.aes = FALSE,
+                                   colour = "black", linetype = "dashed")
+    }
+
     lpmax2 <- lpmax2 + labs(x=time_axis$label, y=ylabel) + #scale_color_npg() +
       theme(legend.title=element_blank(),
                                                       panel.background = element_rect(fill = "white", colour = "grey90"),
@@ -1183,7 +1303,13 @@ shinyServer(function(input, output, session){
       aucdata <- auc_calculate()
       auc_plot <- bar_plots_auc()
       #writeWorksheetToFile(file, data = data$ms_normdata, sheet = "normalized data")
-      fname <- paste0("norm_", gsub(unlist(strsplit(input$data_file$name, "[.]")[1])[-1], "", input$data_file$name), "xlsx")
+      # everything is assembled below the session temp directory: the app
+      # directory is not necessarily writable, and two users downloading at the
+      # same time would otherwise overwrite each other's files
+      workdir <- tempfile("assaycalc-")
+      dir.create(workdir)
+      on.exit(unlink(workdir, recursive = TRUE), add = TRUE)
+      fname <- file.path(workdir, "workbook.xlsx")
       wb <- loadWorkbook(fname, create = TRUE)
       createSheet(wb, name = "raw data")
       writeWorksheet(wb, data$ms_rawdata, sheet = "raw data")
@@ -1221,48 +1347,18 @@ shinyServer(function(input, output, session){
                          sheet = "area under curve")
         }
         if(1 %in% input$settings_data_download1){
-          png("wellplot.png", width = 1200, height = 1100)
-          invisible(print(wellplot))
-          dev.off()
-          createSheet(wb, name = "wellplots")
-          createName(wb, name = "well_plots", formula = "wellplots!$B$2")
-          addImage(wb, filename = "wellplot.png", name = "well_plots", originalSize = TRUE)
-          file.remove("wellplot.png")
-          png("layout.png", width = 600, height = 600)
-          invisible(print(layout))
-          dev.off()
-          createSheet(wb, name = "platelayout")
-          createName(wb, name = "plate_layout", formula = "platelayout!$B$2")
-          addImage(wb, filename = "layout.png", name = "plate_layout", originalSize = TRUE)
-          file.remove("layout.png")
-          png("barplot.png", width = 900, height = 900)
-          invisible(print(barplot))
-          dev.off()
-          createSheet(wb, name = "maximabarplots")
-          createName(wb, name = "maxima_bar_plots", formula = "maximabarplots!$B$2")
-          addImage(wb, filename = "barplot.png", name = "maxima_bar_plots", originalSize = TRUE)
-          file.remove("barplot.png")
-          png("mean_graph.png", width = 1200, height = 1200)
-          invisible(print(mean_graph))
-          dev.off()
-          createSheet(wb, name = "meangraphs")
-          createName(wb, name = "mean_graphs", formula = "meangraphs!$B$2")
-          addImage(wb, filename = "mean_graph.png", name = "mean_graphs", originalSize = TRUE)
-          file.remove("mean_graph.png")
-          if(is.null(auc_plot)==FALSE){
-            png("auc_plot.png", width = 900, height = 900)
-            invisible(print(auc_plot))
-            dev.off()
-            createSheet(wb, name = "aucbarplots")
-            createName(wb, name = "auc_bar_plots", formula = "aucbarplots!$B$2")
-            addImage(wb, filename = "auc_plot.png", name = "auc_bar_plots", originalSize = TRUE)
-            file.remove("auc_plot.png")
-          }
+          add_plot_sheet(wb, workdir, wellplot, "wellplots", "well_plots", 1200, 1100)
+          add_plot_sheet(wb, workdir, layout, "platelayout", "plate_layout", 600, 600)
+          add_plot_sheet(wb, workdir, barplot, "maximabarplots", "maxima_bar_plots", 900, 900)
+          add_plot_sheet(wb, workdir, mean_graph, "meangraphs", "mean_graphs", 1200, 1200)
+          add_plot_sheet(wb, workdir, auc_plot, "aucbarplots", "auc_bar_plots", 900, 900)
         }
       }
       saveWorkbook(wb)
-      file.rename(fname,file)
-    
+      # a plain rename fails when the temp directory sits on another file
+      # system than the download directory
+      file.copy(fname, file, overwrite = TRUE)
+
     }
   )
   
@@ -1434,6 +1530,21 @@ shinyServer(function(input, output, session){
       return(NULL)
     numericInput("ros_interval", "Interval between measurement points [s]",
                  value = ros_interval(), min = 1, step = 1)
+  })
+
+  output$ui.reference_group <- renderUI({
+    curves <- reference_curves()
+
+    if (is.null(curves))
+      return(NULL)
+
+    groups <- setdiff(colnames(curves), "time")
+
+    if (length(groups) == 0)
+      return(NULL)
+
+    selectInput("reference_group", "Reference curve", choices = groups,
+                selected = groups[1])
   })
 
   output$ui.auc_range <- renderUI({

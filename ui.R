@@ -195,7 +195,17 @@ dashboardPage(skin = "green",
                              choices = list("Elicitor" = 1, "Genotype" = 2),
                              selected = 1),
                 uiOutput("ui.time_unit"),
-                uiOutput("ui.time_interval")
+                uiOutput("ui.time_interval"),
+                hr(),
+                radioButtons(inputId="reference_source", label=h4("Reference curve"),
+                             choices = list("None" = "none",
+                                            "Group from this plate" = "plate",
+                                            "Uploaded file" = "file"),
+                             selected = "none"),
+                fileInput("reference_file",
+                          label = h6("Reference file (time in the first column)"),
+                          accept = c(".xls", ".xlsx", ".csv")),
+                uiOutput("ui.reference_group")
                 )
           )
         ),

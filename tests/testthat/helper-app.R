@@ -55,6 +55,34 @@ new_temp_dir <- function() {
   path
 }
 
+# Write a synthetic Luminoscan .txt export: tab separated with a comma as
+# decimal separator, a leading label column, and the wells spread over several
+# blocks that each start with a header row of well names.
+write_luminoscan <- function(path, well_blocks, n_values, offset = 0) {
+  lines <- character(0)
+  for (wells in well_blocks) {
+    lines <- c(lines, paste(c("Time", wells), collapse = "\t"))
+    for (i in seq_len(n_values)) {
+      values <- offset + i + seq_along(wells) / 10
+      lines <- c(lines, paste(c(i, sub(".", ",", sprintf("%.1f", values),
+                                       fixed = TRUE)),
+                              collapse = "\t"))
+    }
+  }
+  writeLines(lines, path)
+  path
+}
+
+# A matching pair of measurement and discharge exports for one quadrant.
+quadrant_files <- function(dir, wells_1, wells_2) {
+  list(
+    measurement = write_luminoscan(file.path(dir, "QE.txt"),
+                                   list(wells_1, wells_2), 72),
+    discharge = write_luminoscan(file.path(dir, "QD.txt"),
+                                 list(wells_1, wells_2), 6, offset = 1000)
+  )
+}
+
 # A compact fingerprint of a numeric object.  Pinning these instead of whole
 # matrices keeps the expected values readable while still catching any change
 # in the numbers.

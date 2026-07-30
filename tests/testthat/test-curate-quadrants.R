@@ -9,31 +9,8 @@
 #     each other; every block starts with a header row of well names
 #   * measurement export: 1 header + 72 value rows per block
 #   * discharge export:   1 header + 6 value rows per block
-
-write_luminoscan <- function(path, well_blocks, n_values, offset = 0) {
-  lines <- character(0)
-  for (b in seq_along(well_blocks)) {
-    wells <- well_blocks[[b]]
-    lines <- c(lines, paste(c("Time", wells), collapse = "\t"))
-    for (i in seq_len(n_values)) {
-      values <- offset + i + seq_along(wells) / 10
-      lines <- c(lines, paste(c(i, sub(".", ",", sprintf("%.1f", values),
-                                       fixed = TRUE)),
-                              collapse = "\t"))
-    }
-  }
-  writeLines(lines, path)
-  path
-}
-
-quadrant_files <- function(dir, wells_1, wells_2) {
-  list(
-    measurement = write_luminoscan(file.path(dir, "QE.txt"),
-                                   list(wells_1, wells_2), 72),
-    discharge = write_luminoscan(file.path(dir, "QD.txt"),
-                                 list(wells_1, wells_2), 6, offset = 1000)
-  )
-}
+#
+# write_luminoscan() and quadrant_files() build such a file, see helper-app.R.
 
 test_that("curateQ returns 0 when a file is missing", {
   expect_equal(app$curateQ(NULL, NULL), 0)
