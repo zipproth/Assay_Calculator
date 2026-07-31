@@ -1,23 +1,21 @@
-#Assay_Calculator 130517
-#version 1.4
+#Assay_Calculator
 library(shiny)
 library(shinydashboard)
-options(java.parameters = "-Xss2560k")
 
 dashboardPage(skin = "green",
   dashboardHeader(
-    title = "Assay Calculator"  
-    
+    title = "Assay Calculator"
+
   ),
-  
+
   dashboardSidebar(
     sidebarMenu(
-      menuItem("Instructions", tabName = "instructions", icon = icon("commenting-o"), selected = FALSE),
+      menuItem("Instructions", tabName = "instructions", icon = icon("circle-info"), selected = FALSE),
       menuItem("Data Analysis", tabName = "analysis", icon = icon("calculator"), selected = TRUE,
-               menuSubItem("Standart Analysis", tabName = "rawdata", icon = icon("file-o")),
+               menuSubItem("Standard Analysis", tabName = "rawdata", icon = icon("file-lines")),
                menuSubItem("Multiple Measurements", tabName = "multi", icon = icon("clone"))),
       menuItemOutput("menu1"),
-      menuItem("Mapping Tools", tabName = "mapping", icon = icon("map-o"), selected = FALSE,
+      menuItem("Mapping Tools", tabName = "mapping", icon = icon("map"), selected = FALSE,
                menuSubItem("Combine Files", tabName = "combine", icon = icon("clone")),
                menuSubItem("Mapping Wellcurves", tabName = "mapping_wellcurves", icon = icon("calculator"))),
       menuItemOutput("menu2")
@@ -26,15 +24,9 @@ dashboardPage(skin = "green",
     fileInput("data_file", label = h4("Data file input"), accept = c(".xls", ".xlsx", ".csv")),
     fileInput("layout_file", label = h4("Layout file input (optional)"), accept = c(".xls", ".xlsx"))
   ),
-  
+
   dashboardBody(
     tags$head(tags$style(HTML('
-#      .skin-green .main-sidebar {
-#        background-color: #666666;
-#      }
-#      .skin-green .sidebar-menu>li.active>a, .skin-green .sidebar-menu>li:hover>a {
-#        background-color: #444444;
-#      }
       .content-wrapper,
       .right-side {
         background-color: #ffffff;
@@ -42,21 +34,22 @@ dashboardPage(skin = "green",
     '))),
     tabItems(
       tabItem(tabName = "instructions",
-          HTML("<center><h1><strong>Welcome to Assay Calculator</strong></h1><h6>Version 2.1 (19.03.2018)</h6></center>"),
+          HTML("<center><h1><strong>Welcome to Assay Calculator</strong></h1></center>"),
           br(),
           div(class="body", style="font-size:120%",
               HTML("<p>This web application is designed to help you to analyse your data.
-                   <br> 
-                   For now it can process data you obtained from aequorin luminescence measurements (<strong>'Calcium Assay'</strong>) or ROS measurements (<strong>'ROS Assay'</strong>)
+                   <br>
+                   It can process data obtained from aequorin luminescence measurements (<strong>'Calcium Assay'</strong>) or ROS measurements (<strong>'ROS Assay'</strong>).
                    <br>
                    <br>
                    To view well plots and to start the calculations open the 'Data Analysis' tab.
                    <strong><h3>Here are some things you have to keep in mind:</h3></strong>
-                   <li>Input files have to be .xls or .xlsx files</li>
-                   <li>Data has to be formatted accordingly</li>
-                   <li>Plate layout is optional but required for ROS Assay normalization and mean/maxima calculation</li>
-                   <li><strong>ROS layout: Put 'control' in elicitor column for measurements used for blanking</strong></li>
-                   <li>Calculations take their time! Be patient!</li></p>"),
+                   <li>Input files have to be .xls, .xlsx or .csv files</li>
+                   <li>Data has to be formatted accordingly, one column per well</li>
+                   <li>The plate layout is optional, but it is required for the ROS normalization and for every mean, maximum and area calculation</li>
+                   <li><strong>ROS layout: put 'control' in the elicitor column for the measurements used for blanking</strong></li>
+                   <li>The measurement interval defaults to 10 s for the calcium assay and 60 s for the ROS assay and can be changed in the well curve settings; it scales the time axis and the calcium normalization</li>
+                   <li>Every setting that influenced the numbers is written to the 'settings' sheet of the download</li></p>"),
               HTML("<h3><strong>Download example data or empty templates:</strong></h3>"),
               tags$li(div(style="display:inline-block",
                     p("Get")),
@@ -75,21 +68,19 @@ dashboardPage(skin = "green",
                 downloadLink('downloadDatatemplate', 'data template'),
                 div(style="display:inline-block",
                     p("and")),
-                downloadLink('downloadLayouttemplate', 'plate layout template')  
+                downloadLink('downloadLayouttemplate', 'plate layout template')
               )),
           hr(),
           div(style="display:inline-block",
-            p("This web application was created by Alexander Kutschera (TU Munich) as a OpenPlantScience community project.")),
+            p("Assay Calculator was created by Alexander Kutschera (TU Munich) as an OpenPlantScience community project and is maintained in this fork by the Ranf lab.")),
           div(style="display:inline-block",
-              p("Please feel free and send me your ")),
+              p("Please send your ")),
           div(style="display:inline-block",
-              a(href="mailto:alexander.kutschera@tum.de", "feedback!")
+              a(href="mailto:stefanie.ranf-zipproth@unifr.ch", "feedback!")
           ),
           div(style="display:inline-block",
               p("Assay Calculator is licenced with the ")),
           downloadLink('downloadLicense', 'GNU General Public License v3.0')
-
-
 
       ),
       tabItem(tabName = "rawdata",
@@ -97,7 +88,6 @@ dashboardPage(skin = "green",
           box(title = "Well Curves",
               solidHeader = TRUE,
               status = "success",
-#              background = "black",
               width = 9,
               collapsible = FALSE,
               plotOutput("plot", height = 600)),
@@ -105,14 +95,24 @@ dashboardPage(skin = "green",
               solidHeader = TRUE,
               status = "success",
               width = 3,
-#              collapsible = TRUE,
-              radioButtons(inputId="assay_type", label="Assay Type:", 
+              radioButtons(inputId="assay_type", label="Assay Type:",
                           choices = list("Calcium Assay" = 1, "ROS Assay" = 2),
                           selected = 1),
               uiOutput("ui.settings1"),
               hr(),
+              h4("Measurement"),
+              uiOutput("ui.interval"),
+              uiOutput("ui.ros_background"),
+              uiOutput("ui.excluded_wells"),
+              hr(),
               h4("Options"),
               checkboxInput("file_name", label = "Write filename as header", value = TRUE),
+              radioButtons(inputId="palette", label="Colour palette",
+                           choices = list("ggplot default" = "ggplot",
+                                          "Okabe-Ito (colour blind safe)" = "okabe_ito",
+                                          "Viridis (colour blind safe)" = "viridis",
+                                          "Nature Publishing Group" = "npg"),
+                           selected = "ggplot"),
               uiOutput("ui.settings5"),
               uiOutput("ui.settings2"),
               uiOutput("ui.settings3"),
@@ -123,12 +123,11 @@ dashboardPage(skin = "green",
           uiOutput("ui.plate_layout")
         )
       ),
-      
+
       tabItem(tabName = "norm_data1",
         fluidRow(
           box(title = "Maxima of the Mean with SD",
               width = 9,
-#              collapsible = TRUE,
               solidHeader = TRUE,
               status = "success",
               plotOutput("bar_max", height = 600)
@@ -137,17 +136,18 @@ dashboardPage(skin = "green",
               width = 3,
               solidHeader = TRUE,
               status = "success",
-              radioButtons(inputId="bar_rotation", label=h4("Bar Rotation"), 
+              radioButtons(inputId="bar_rotation", label=h4("Bar Rotation"),
                            choices = list("Vertical Bars" = 1, "Horizontal Bars" = 2),
                            selected = 1),
-              radioButtons(inputId="bar_columns", label=h4("Plot Arrangement"), 
+              radioButtons(inputId="bar_columns", label=h4("Plot Arrangement"),
                            choices = list("Vertical Alignment" = 1, "Horizontal Alignment" = 2),
                            selected = 1),
-              sliderInput("exclude4max", label = h4("Exclude first Values"), min = 0, 
+              sliderInput("exclude4max", label = h4("Exclude first Values"), min = 0,
                           max = 20, value = 4)
             )
           )
         ),
+
       tabItem(tabName = "norm_data3",
         fluidRow(
           box(title = "Area under Curve of the Mean with SD",
@@ -172,15 +172,16 @@ dashboardPage(skin = "green",
               radioButtons(inputId="auc_method", label="Method",
                            choices = list("Trapezoidal (area over time)" = "trapezoid",
                                           "Sum of values" = "sum"),
-                           selected = "trapezoid")
+                           selected = "trapezoid"),
+              uiOutput("ui.auc_reference")
             )
           )
         ),
+
       tabItem(tabName = "norm_data2",
           fluidRow(
             box(title = "Mean Kinetics",
                 width = 9,
-#                collapsible = TRUE,
                 solidHeader = TRUE,
                 status = "success",
                 plotOutput("graph_mean", height = 600)
@@ -195,10 +196,10 @@ dashboardPage(skin = "green",
                              choices = list("Elicitor" = 1, "Genotype" = 2),
                              selected = 1),
                 uiOutput("ui.time_unit"),
-                uiOutput("ui.time_interval"),
                 hr(),
                 radioButtons(inputId="reference_source", label=h4("Reference curve"),
                              choices = list("None" = "none",
+                                            "Wells from this plate" = "wells",
                                             "Group from this plate" = "plate",
                                             "Uploaded file" = "file"),
                              selected = "none"),
@@ -212,7 +213,7 @@ dashboardPage(skin = "green",
 
 
       tabItem(tabName = "combine",
-          fluidRow(  
+          fluidRow(
             box(title = "Combine raw files",
                 solidHeader = TRUE,
                 status = "success",
@@ -241,18 +242,17 @@ dashboardPage(skin = "green",
                   width = 12,
                   collapsible = TRUE,
                   h4("Upload assay data with wildtype plants for comparison"),
-                  div(style="display: inline-block;vertical-align:top; width: 300px;",fileInput("WT_file", label = h6("Wildtype data input (optional)"), accept = c(".csv"))),
+                  div(style="display: inline-block;vertical-align:top; width: 300px;",fileInput("WT_file", label = h6("Wildtype data input (optional)"), accept = c(".csv", ".xls", ".xlsx"))),
                   br(),
                   div(style="display: inline-block;vertical-align:mid; width: 150px;", checkboxInput("mean_overlay_WT", label = "plot WT mean", value = FALSE)),
                   div(style="display: inline-block;vertical-align:mid; width: 150px;",checkboxInput("mean_overlay_plate", label = "plot plate mean", value = FALSE))
               )
-            ),          
-              
+            ),
+
           fluidRow(
             box(title = "Mapping Well Curves",
                 solidHeader = TRUE,
                 status = "success",
-                #              background = "black",
                 width = 12,
                 collapsible = FALSE,
                 plotOutput("mappingplot", height = 900))
@@ -267,7 +267,7 @@ tabItem(tabName = "multi",
               status = "success",
               width = 12,
               collapsible = TRUE,
-              h4("Upload additional datasets for compairson"),
+              h4("Upload additional datasets for comparison"),
               div(style="display: inline-block;vertical-align:top; width: 300px;",fileInput("data2", label = h4("Data file input 2"), accept = c(".xls", ".xlsx"))),
               div(style="display: inline-block;vertical-align:top; width: 300px;",fileInput("data3", label = h4("Data file input 3"), accept = c(".xls", ".xlsx"))),
               div(style="display: inline-block;vertical-align:top; width: 300px;",fileInput("data4", label = h4("Data file input 4"), accept = c(".xls", ".xlsx"))),
@@ -277,11 +277,10 @@ tabItem(tabName = "multi",
               div(style="display: inline-block;vertical-align:top; width: 300px;",fileInput("layout4", label = h4("Layout file input 4"), accept = c(".xls", ".xlsx")))
           )
         ),
-          
+
           box(title = "Multiple Well Curves",
               solidHeader = TRUE,
               status = "success",
-              #              background = "black",
               width = 12,
               collapsible = FALSE,
               plotOutput("multiple_wellplots")
@@ -289,7 +288,7 @@ tabItem(tabName = "multi",
 ),
 
 
-      tabItem(tabName = "download", 
+      tabItem(tabName = "download",
              h3("Download Everything!"),
              box(title = "Download Data",
                  width = 4,
@@ -299,17 +298,14 @@ tabItem(tabName = "multi",
                  checkboxGroupInput("settings_data_download1", label = h5("General Setting"),
                                     selected = "1",
                                     choices = list("Add graphs to Excel file" = 1))
-                                                   #"Don't add mean data" = 2))
              ),
              box(title = "Download Plots",
                  width = 4,
                  solidHeader = TRUE,
                  status = "success",
                  uiOutput("ui.downloadplot")
-                 #checkboxGroupInput("settings_plot_download1", label = h5("General Setting"), 
-                 #                  choices = list("Don't add mean data" = 1))
              )
-             
+
         )
       )
     )

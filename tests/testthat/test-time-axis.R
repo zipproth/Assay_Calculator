@@ -34,8 +34,7 @@ test_that("the calcium kinetics can be switched to minutes", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
-      layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421
+      layout_file = example_upload("CaExample_layout.xlsx")
     ))
 
     # seconds is the default of the calcium assay
@@ -51,43 +50,65 @@ test_that("the calcium kinetics can be switched to minutes", {
   })
 })
 
-test_that("the ROS kinetics keep measurement points until an interval is given", {
+test_that("the ROS kinetics keep measurement points until a unit is chosen", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
       assay_type = "2",
       data_file = example_upload("ROSExample.xlsx"),
-      layout_file = example_upload("ROSExample_layout.xlsx"),
-      xlim = c(0, 690), ylim = 30262
+      layout_file = example_upload("ROSExample_layout.xlsx")
     ))
 
-    points <- suppressMessages(mean_graphs())
+    points <- mean_graphs()
     expect_equal(points$labels$x, "Measurement points")
     expect_equal(range(points$data$time), c(-10, 59))
 
-    session$setInputs(time_unit = "min", ros_interval = 30)
-    minutes <- suppressMessages(mean_graphs())
+    session$setInputs(time_unit = "min", interval_value = 30, interval_unit = "s")
+    minutes <- mean_graphs()
     expect_equal(minutes$labels$x, "Time [min]")
     expect_equal(range(minutes$data$time), c(-5, 29.5))
   })
 })
 
-test_that("an unusable interval falls back to one minute", {
+test_that("the measurement interval defaults per assay and accepts minutes", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
       assay_type = "2",
       data_file = example_upload("ROSExample.xlsx"),
-      layout_file = example_upload("ROSExample_layout.xlsx"),
-      xlim = c(0, 690), ylim = 30262, time_unit = "s"
+      layout_file = example_upload("ROSExample_layout.xlsx"), time_unit = "s"
     ))
-    expect_equal(ros_interval(), 60)
+    # the ROS default is one minute
+    expect_equal(measurement_interval(), 60)
 
-    session$setInputs(ros_interval = 0)
-    expect_equal(ros_interval(), 60)
+    # 10 minutes is a common, high value and has to be possible
+    session$setInputs(interval_value = 10, interval_unit = "min")
+    expect_equal(measurement_interval(), 600)
 
-    session$setInputs(ros_interval = NA)
-    expect_equal(ros_interval(), 60)
+    session$setInputs(interval_value = 90, interval_unit = "s")
+    expect_equal(measurement_interval(), 90)
 
-    session$setInputs(ros_interval = 90)
-    expect_equal(ros_interval(), 90)
+    # unusable entries fall back to the default of the assay
+    session$setInputs(interval_value = 0)
+    expect_equal(measurement_interval(), 60)
+
+    session$setInputs(interval_value = NA)
+    expect_equal(measurement_interval(), 60)
+
+    session$setInputs(assay_type = "1", interval_value = NULL)
+    expect_equal(measurement_interval(), 10)
   })
+})
+
+test_that("the calcium interval scales the normalization and the time axis", {
+  fast <- app$calculate_data(example_upload("CaExample.xlsx"), 15, "2", "1",
+                             interval = 10)
+  slow <- app$calculate_data(example_upload("CaExample.xlsx"), 15, "2", "1",
+                             interval = 20)
+
+  expect_equal(fast$ms_normdata$time, seq(0, 1910, by = 10))
+  expect_equal(slow$ms_normdata$time, seq(0, 3820, by = 20))
+
+  # L/Lmax is a rate per interval, so doubling the interval halves it
+  expect_equal(slow$ms_normdata$A1, fast$ms_normdata$A1 / 2, tolerance = 1e-12)
+  # the raw values never change
+  expect_equal(slow$ms_rawdata$A1, fast$ms_rawdata$A1)
 })

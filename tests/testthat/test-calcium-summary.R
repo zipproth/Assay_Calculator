@@ -29,9 +29,7 @@ calcium_inputs <- function(...) {
   modifyList(
     app_inputs(
       data_file = example_upload("CaExample.xlsx"),
-      layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910),
-      ylim = 1.80872539596421
+      layout_file = example_upload("CaExample_layout.xlsx")
     ),
     list(...)
   )
@@ -87,30 +85,49 @@ test_that("the exported sheets interleave the values with their SD", {
     mm <- mean_max_calculate()
 
     expect_equal(dim(mm$graphs_shaped_w_sd), c(192L, 57L))
-    expect_equal(dim(mm$all_means_shaped_w_sd), c(2L, 56L))
+    expect_equal(dim(mm$all_means_shaped_w_sd), c(1L, 56L))
     expect_equal(colnames(mm$all_means_shaped_w_sd)[1:4],
                  c("genotype 1 Super Elicitor [5µM]", "SD",
                    "genotype 2 Super Elicitor [5µM]", "SD"))
 
-    # documented current behaviour: the maxima matrix is allocated with two
-    # rows but only the first one is ever filled, so the exported sheet has a
-    # trailing empty row
-    expect_true(all(is.na(mm$all_means_shaped[2, ])))
+    # up to this fork the maxima matrix was allocated with two rows but only
+    # the first one was ever filled, so the exported sheet carried a trailing
+    # empty row
+    expect_equal(dim(mm$all_means_shaped), c(1L, 28L))
+    expect_false(anyNA(mm$all_means_shaped))
   })
 })
 
 test_that("the well data sheet is labelled with genotype and elicitor", {
   testServer(APP_DIR, {
     do.call(session$setInputs, calcium_inputs())
-    mm <- suppressWarnings(mean_max_calculate())
+    mm <- mean_max_calculate()
     nm <- colnames(mm$ms_normdata_names)
 
     expect_length(nm, 97L)
     expect_equal(nm[1], "genotype 1 Super Elicitor [5µM]")
-    # documented current behaviour: the labels are derived by comparing two
-    # vectors of different length, so the time column ends up without a name
-    expect_true(is.na(nm[97]))
+    expect_equal(nm[96], "genotype 2 Compound 13 [25 µg/ml]")
+    # up to this fork the labels were derived by comparing two vectors of
+    # different length, so the time column ended up without a name and any
+    # layout that was not sorted like the data scrambled the whole sheet
+    expect_equal(nm[97], "time")
+    expect_false(anyNA(nm))
   })
+})
+
+test_that("the well labels follow the layout, not its row order", {
+  # A layout whose rows are in a different order than the sorted data columns
+  # used to produce mostly NA labels.
+  layout <- app$read_plate_layout(example_upload("CaExample_layout.xlsx"))
+  shuffled <- layout$plate_layout[rev(seq_len(nrow(layout$plate_layout))), ]
+
+  data <- app$calculate_data(example_upload("CaExample.xlsx"), 15, "2", "1")
+  mm <- app$group_means_maxima(data, shuffled)
+  nm <- colnames(mm$ms_normdata_names)
+
+  expect_false(anyNA(nm))
+  expect_equal(nm[1], "genotype 1 Super Elicitor [5µM]")
+  expect_equal(nm[97], "time")
 })
 
 test_that("the exclude slider moves the start of the maximum search", {
@@ -132,8 +149,7 @@ test_that("the exclude slider moves the start of the maximum search", {
 test_that("mean_max_calculate needs both a layout and a data file", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
-      data_file = example_upload("CaExample.xlsx"),
-      layout_file = NULL, xlim = c(0, 1910), ylim = 1.8
+      data_file = example_upload("CaExample.xlsx")
     ))
     expect_null(mean_max_calculate())
   })

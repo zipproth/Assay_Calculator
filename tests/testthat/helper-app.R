@@ -1,16 +1,30 @@
 # Shared setup for the Assay Calculator test suite.
 #
-# server.R defines all of its calculation helpers at file level and only calls
-# shinyServer() at the very end, so the file can be sourced into a private
-# environment.  That gives the tests direct access to the real production code
-# without starting a Shiny session.
+# The calculations, the plot builders and the download writers live in R/ as
+# plain functions.  Sourcing those modules into a private environment gives the
+# tests direct access to the real production code without starting a Shiny
+# session; the reactive layer in server.R is exercised with shiny::testServer().
 
 APP_DIR <- normalizePath(file.path("..", ".."), mustWork = TRUE)
 
 app <- new.env(parent = globalenv())
-suppressWarnings(suppressMessages(
-  sys.source(file.path(APP_DIR, "server.R"), envir = app, chdir = TRUE)
-))
+suppressWarnings(suppressMessages({
+  library(shiny)
+  library(ggplot2)
+  library(plyr)
+  library(reshape2)
+  library(shinydashboard)
+  library(gridExtra)
+  library(gtools)
+  library(ggsci)
+  library(readxl)
+  library(openxlsx)
+
+  for (module in list.files(file.path(APP_DIR, "R"), pattern = "[.][Rr]$",
+                            full.names = TRUE)) {
+    sys.source(module, envir = app)
+  }
+}))
 
 # Build the data frame that Shiny's fileInput hands to the server, for one of
 # the example files shipped with the app.

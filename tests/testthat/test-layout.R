@@ -2,11 +2,11 @@
 # (Row/Column) from the well names.
 
 test_that("layout returns NULL without a file", {
-  expect_null(app$layout(NULL))
+  expect_null(app$read_plate_layout(NULL))
 })
 
 test_that("layout of the calcium example is read completely", {
-  lay <- app$layout(example_upload("CaExample_layout.xlsx"))
+  lay <- app$read_plate_layout(example_upload("CaExample_layout.xlsx"))
 
   expect_named(lay, c("empty_wells", "plate_layout"))
   expect_equal(names(lay$plate_layout),
@@ -32,7 +32,7 @@ test_that("layout of the calcium example is read completely", {
 })
 
 test_that("layout of the ROS example contains the control elicitor", {
-  lay <- app$layout(example_upload("ROSExample_layout.xlsx"))
+  lay <- app$read_plate_layout(example_upload("ROSExample_layout.xlsx"))
 
   expect_equal(nrow(lay$plate_layout), 96)
   expect_equal(unique(lay$plate_layout$genotype), c("genotype1", "genotype2"))
@@ -46,7 +46,7 @@ test_that("layout of the ROS example contains the control elicitor", {
 })
 
 test_that("wells without genotype and elicitor are reported as empty", {
-  lay <- app$layout(example_upload("Layouttemplate.xlsx"))
+  lay <- app$read_plate_layout(example_upload("Layouttemplate.xlsx"))
 
   expect_equal(nrow(lay$plate_layout), 96)
   expect_length(lay$empty_wells, 96)

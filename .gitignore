@@ -3,3 +3,14 @@
 .RData
 .Ruserdata
 .DS_Store
+
+# assistant scratch files, these do not belong in the repository
+CLAUDE.md
+HANDOVER.md
+MEMORY.md
+.claude/
+
+# renv library, only the lockfile is tracked
+renv/library/
+renv/local/
+renv/staging/

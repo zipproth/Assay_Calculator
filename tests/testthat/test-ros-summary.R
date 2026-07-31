@@ -25,7 +25,7 @@ ros_inputs <- function(...) {
       assay_type = "2",
       data_file = example_upload("ROSExample.xlsx"),
       layout_file = example_upload("ROSExample_layout.xlsx"),
-      xlim = c(0, 690),
+      xlim = c(0, 4140),
       ylim = 30262
     ),
     list(...)

@@ -70,22 +70,35 @@ test_that("the melted data sets carry time, well and value", {
   expect_equal(dim(ca$ms_rd_melted), c(18432L, 3L))
 })
 
-test_that("plate_mean currently returns the values of the first well only", {
-  # Documented current behaviour, not intended behaviour: the column subset in
-  # calculate_data() uses a logical vector over the *rows* (!time), which
-  # selects the first column instead of all wells.  The green "plot plate mean"
-  # overlay therefore shows well A1.
+test_that("plate_mean is the mean over all wells of the plate", {
+  # Up to this fork plate_mean returned the values of well A1: the column
+  # subset used a logical vector over the *rows* (!time), which selects the
+  # first column instead of all wells.  The green "plot plate mean" overlay
+  # showed a single well.
   expect_equal(dim(ca$plate_mean), c(192L, 2L))
   expect_equal(names(ca$plate_mean), c("time", "values"))
-  expect_equal(head(ca$plate_mean$values, 4), head(ca$ms_normdata$A1, 4))
+  expect_equal(ca$plate_mean$time, seq(0, 1910, by = 10))
 
   wells <- setdiff(names(ca$ms_normdata), "time")
-  true_mean <- unname(rowMeans(ca$ms_normdata[wells]))
-  expect_false(isTRUE(all.equal(head(ca$plate_mean$values, 4),
-                                head(true_mean, 4))))
-  expect_equal(head(true_mean, 4),
+  expect_equal(ca$plate_mean$values, unname(rowMeans(ca$ms_normdata[wells])),
+               tolerance = 1e-10)
+  expect_equal(head(ca$plate_mean$values, 4),
                c(0.0362501274546103, 0.0289486197222434,
                  0.0259973935078381, 0.0252451116019937),
+               tolerance = 1e-10)
+
+  # and it is no longer the first well
+  expect_false(isTRUE(all.equal(head(ca$plate_mean$values, 4),
+                                head(ca$ms_normdata$A1, 4))))
+})
+
+test_that("wells that were never filled do not count into the plate mean", {
+  data <- ca
+  data$ms_normdata$A1 <- 0
+
+  expect_equal(app$well_rowmeans(data$ms_normdata),
+               rowMeans(data$ms_normdata[setdiff(names(data$ms_normdata),
+                                                 c("time", "A1"))]),
                tolerance = 1e-10)
 })
 

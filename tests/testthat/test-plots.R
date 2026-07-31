@@ -4,15 +4,16 @@
 # catching accidental changes to what is drawn.
 
 ca_data <- app$calculate_data(example_upload("CaExample.xlsx"), 15, "2", "1")
-ca_layout <- app$layout(example_upload("CaExample_layout.xlsx"))
+ca_layout <- app$read_plate_layout(example_upload("CaExample_layout.xlsx"))
 
 test_that("draw_well_plate builds a 12 column facetted line plot", {
   g <- app$draw_well_plate(
     data = ca_data,
     empty_wells = ca_layout$empty_wells,
-    mean_overlay = FALSE,
-    mean_overlay_plate = FALSE,
-    mean_overlay_WT = FALSE,
+    excluded_wells = NULL,
+    mean_melted = NULL,
+    plate_mean = NULL,
+    reference_plate_mean = NULL,
     file_name = FALSE,
     data_file = "CaExample.xlsx",
     xlim = ca_data$xrange,
@@ -35,13 +36,13 @@ test_that("draw_well_plate builds a 12 column facetted line plot", {
 test_that("draw_well_plate switches to 24 columns for 384 well plates", {
   fake <- ca_data
   fake$well_plate <- 384
-  g <- app$draw_well_plate(fake, NULL, FALSE, FALSE, FALSE, FALSE,
+  g <- app$draw_well_plate(fake, NULL, NULL, NULL, NULL, NULL, FALSE,
                            "CaExample.xlsx", ca_data$xrange, ca_data$yrange[2])
   expect_equal(g$facet$params$ncol, 24)
 })
 
 test_that("draw_well_plate adds the file name as a title on request", {
-  g <- app$draw_well_plate(ca_data, NULL, FALSE, FALSE, FALSE, TRUE,
+  g <- app$draw_well_plate(ca_data, NULL, NULL, NULL, NULL, NULL, TRUE,
                            "CaExample.xlsx", ca_data$xrange, ca_data$yrange[2])
   expect_equal(g$labels$title, "rawdata file: CaExample.xlsx")
 })
@@ -49,7 +50,7 @@ test_that("draw_well_plate adds the file name as a title on request", {
 test_that("empty wells are blanked out before plotting", {
   data_with_empty <- app$calculate_data(example_upload("CaExample.xlsx"), 15, "2", "1")
   empty <- c("A1", "A2")
-  g <- app$draw_well_plate(data_with_empty, empty, FALSE, FALSE, FALSE, FALSE,
+  g <- app$draw_well_plate(data_with_empty, empty, NULL, NULL, NULL, NULL, FALSE,
                            "CaExample.xlsx", data_with_empty$xrange,
                            data_with_empty$yrange[2])
   blanked <- g$data[g$data$well %in% empty, ]

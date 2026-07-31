@@ -97,7 +97,7 @@ test_that("the per well ROS values average to the published mean curves", {
   # ros_well_values() blanks and background corrects every well individually;
   # averaging the wells of a group has to reproduce ROS_calculate() exactly,
   # otherwise the areas would not belong to the plotted curves.
-  layout <- app$layout(example_upload("ROSExample_layout.xlsx"))
+  layout <- app$read_plate_layout(example_upload("ROSExample_layout.xlsx"))
   raw_plate_layout <- layout$plate_layout[, 1:4]
   raw_plate_layout <- raw_plate_layout[complete.cases(raw_plate_layout), ]
 
@@ -110,8 +110,7 @@ test_that("the per well ROS values average to the published mean curves", {
     do.call(session$setInputs, app_inputs(
       assay_type = "2",
       data_file = example_upload("ROSExample.xlsx"),
-      layout_file = example_upload("ROSExample_layout.xlsx"),
-      xlim = c(0, 690), ylim = 30262
+      layout_file = example_upload("ROSExample_layout.xlsx")
     ))
     published <- suppressMessages(ROS_calculate())$normdata
 
@@ -134,7 +133,6 @@ test_that("the calcium areas are calculated over the selected window", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       auc_rotation = "1", auc_columns = "1", auc_method = "trapezoid",
       auc_range = c(0, 1910)
     ))
@@ -166,7 +164,6 @@ test_that("summing gives the trapezoidal area divided by the interval", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       auc_rotation = "1", auc_columns = "1", auc_method = "sum",
       auc_range = c(0, 1910)
     ))
@@ -191,7 +188,6 @@ test_that("the ROS areas skip the control wells", {
       assay_type = "2",
       data_file = example_upload("ROSExample.xlsx"),
       layout_file = example_upload("ROSExample_layout.xlsx"),
-      xlim = c(0, 690), ylim = 30262,
       auc_rotation = "1", auc_columns = "1", auc_method = "trapezoid",
       auc_range = c(-10, 59)
     ))
@@ -212,7 +208,6 @@ test_that("the area bar plot is built from the calculated areas", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       auc_rotation = "1", auc_columns = "1", auc_method = "trapezoid",
       auc_range = c(0, 1910)
     ))
@@ -235,8 +230,7 @@ test_that("the area bar plot is built from the calculated areas", {
 test_that("no areas are calculated without a layout", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
-      data_file = example_upload("CaExample.xlsx"),
-      xlim = c(0, 1910), ylim = 1.8, auc_range = c(0, 1910)
+      data_file = example_upload("CaExample.xlsx"), auc_range = c(0, 1910)
     ))
     expect_null(auc_calculate())
   })
@@ -246,8 +240,7 @@ test_that("no areas are calculated before the window slider exists", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
-      layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.8
+      layout_file = example_upload("CaExample_layout.xlsx")
     ))
     expect_null(auc_calculate())
   })

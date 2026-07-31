@@ -57,7 +57,6 @@ test_that("the mean curves of the plate can serve as reference curves", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       reference_source = "plate"
     ))
 
@@ -81,7 +80,6 @@ test_that("the reference curve is drawn into the kinetics plot", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       reference_source = "none"
     ))
 
@@ -111,7 +109,6 @@ test_that("the reference curve follows the selected time unit", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       reference_source = "plate",
       reference_group = "genotype 1 Super Elicitor [5µM]",
       time_unit = "min"
@@ -131,7 +128,6 @@ test_that("an uploaded reference curve is drawn as well", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       reference_source = "file",
       reference_file = upload
     ))
@@ -150,7 +146,6 @@ test_that("no reference curve is drawn without a selection", {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx"),
-      xlim = c(0, 1910), ylim = 1.80872539596421,
       reference_source = "plate"
     ))
     # curves are available but nothing is picked yet
@@ -169,7 +164,6 @@ test_that("the ROS mean curves can serve as reference curves", {
       assay_type = "2",
       data_file = example_upload("ROSExample.xlsx"),
       layout_file = example_upload("ROSExample_layout.xlsx"),
-      xlim = c(0, 690), ylim = 30262,
       reference_source = "plate"
     ))
 
