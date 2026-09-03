@@ -11,9 +11,15 @@ add_plot_sheet <- function(wb, workdir, plot, sheet, width, height){
     return(invisible(NULL))
 
   image <- file.path(workdir, paste0(sheet, ".png"))
-  png(image, width = width, height = height)
-  invisible(print(plot))
-  dev.off()
+  # The device is closed in its own scope, so that a plot which fails while it
+  # is drawn cannot leave it current for the rest of the R process.  The scope
+  # also keeps the order: the png file stays empty until dev.off() flushes it,
+  # and insertImage() is handed a finished file, exactly as before.
+  local({
+    png(image, width = width, height = height)
+    on.exit(dev.off(), add = TRUE)
+    invisible(print(plot))
+  })
 
   openxlsx::addWorksheet(wb, sheet)
   openxlsx::insertImage(wb, sheet, image, startRow = 2, startCol = 2,

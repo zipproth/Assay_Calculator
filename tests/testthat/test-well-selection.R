@@ -68,6 +68,51 @@ test_that("excluded wells are left out of the areas", {
   })
 })
 
+test_that("excluding a ROS control well moves the maxima and the areas together", {
+  # A control well carries no bar of its own, it is the blank of its genotype,
+  # so the only thing excluding one can change is that blank.  ros_normalize()
+  # dropped it from the blank and the maxima moved, while the areas were built
+  # from ros_well_values() on the unfiltered layout and did not move by a single
+  # digit.  The settings sheet of that download named a well as excluded that
+  # half of the workbook had still used.
+  testServer(APP_DIR, {
+    do.call(session$setInputs, app_inputs(
+      assay_type = "2",
+      data_file = example_upload("ROSExample.xlsx"),
+      layout_file = example_upload("ROSExample_layout.xlsx"),
+      xlim = c(0, 4140), ylim = 30262,
+      auc_rotation = "1", auc_columns = "1", auc_method = "trapezoid",
+      auc_range = c(-10, 59), auc_reference = "", reference_source = "none"
+    ))
+    full_maxima <- suppressMessages(ROS_calculate())$maxima
+    full <- auc_calculate()$auc
+
+    session$setInputs(excluded_wells = "A11")   # a control well of genotype1
+    reduced_maxima <- suppressMessages(ROS_calculate())$maxima
+    reduced <- auc_calculate()$auc
+
+    genotype1 <- grepl("^genotype1 ", names(full_maxima))
+    expect_true(all(reduced_maxima[genotype1] != full_maxima[genotype1]))
+    expect_equal(reduced_maxima[!genotype1], full_maxima[!genotype1])
+
+    # The areas describe the same groups in the same order, and none of them
+    # loses a replicate: a control well is no replicate of any group.
+    expect_equal(paste(reduced$genotype, reduced$elicitor),
+                 paste(full$genotype, full$elicitor))
+    expect_equal(reduced$n, full$n)
+
+    # A different blank shifts every well of the genotype by the same curve, so
+    # every genotype1 area moves by the area of that curve and the spread
+    # between the replicates stays where it is.
+    moved <- reduced$values - full$values
+    genotype1 <- reduced$genotype == "genotype1"
+    expect_equal(moved[genotype1], rep(-22379.6285714286, sum(genotype1)),
+                 tolerance = 1e-9)
+    expect_equal(moved[!genotype1], rep(0, sum(!genotype1)))
+    expect_equal(reduced$sd, full$sd)
+  })
+})
+
 test_that("a group loses its bar once all of its wells are excluded", {
   testServer(APP_DIR, {
     do.call(session$setInputs, calcium_inputs2())
@@ -187,6 +232,46 @@ test_that("a ROS reference well carries the blanked values", {
     wells <- analysis_well_values()
     expect_equal(reference$values, wells$values$A1, tolerance = 1e-12)
   })
+})
+
+test_that("picking wells as the reference curve emits no warning", {
+  # wells$values[selected, drop = FALSE] handed [.data.frame one subscript and a
+  # named drop.  That takes the list branch, which selects the columns that were
+  # meant, but R answers every single call with "'drop' argument will be
+  # ignored".  The curve is rebuilt on every input change, so the warning filled
+  # the shiny-server log; the suite itself reported three of them.
+  #
+  # The expectation has to sit around testServer() and not around the reactive:
+  # shiny muffles a warning raised inside a reactive and re-signals it when the
+  # session ends, so an expect_no_warning() on reference_curve() never sees it.
+  expect_no_warning(testServer(APP_DIR, {
+    do.call(session$setInputs,
+            calcium_inputs2(reference_source = "wells", reference_wells = "A1"))
+    reference_curve()
+
+    # A selection of several wells takes the same line, and it is the only case
+    # a "drop" could ever have applied to.
+    session$setInputs(reference_wells = c("A1", "A2", "A3"))
+    reference_curve()
+  }))
+
+  # The ROS wells come out of ros_well_values() instead of the normalized data:
+  # another data frame, and one built by as.data.frame(sweep(...)).  Had it
+  # stayed a matrix, dropping the drop would have indexed it element wise.
+  expect_no_warning(testServer(APP_DIR, {
+    do.call(session$setInputs, app_inputs(
+      assay_type = "2",
+      data_file = example_upload("ROSExample.xlsx"),
+      layout_file = example_upload("ROSExample_layout.xlsx"),
+      xlim = c(0, 4140), ylim = 30262,
+      reference_source = "wells", reference_wells = c("A1", "A2")
+    ))
+
+    wells <- analysis_well_values()
+    expect_equal(reference_curve()$values,
+                 (wells$values$A1 + wells$values$A2) / 2,
+                 tolerance = 1e-12)
+  }))
 })
 
 test_that("no reference curve is drawn without a well selection", {

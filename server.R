@@ -50,6 +50,19 @@ shinyServer(function(input, output, session){
     return(min(round(value), ros_background_points() - 1))
   })
 
+  # Whether the points recorded before the elicitation fit into the file that
+  # was uploaded.  The background window ends one point before the elicitation,
+  # so the last row it reads is bg_values - 1: a measurement of n points can
+  # carry at most n + 1 points before it.  Beyond that the ROS analysis is
+  # refused rather than calculated from a shortened window, because a clamped
+  # background looks exactly like a chosen one -- in the plot and in the
+  # settings sheet of the download.
+  ros_background_fits <- reactive({
+    data <- calculate()
+    if (is.null(data)) return(TRUE)
+    return(ros_background_points() <= nrow(data$ms_rawdata) + 1)
+  })
+
   # Unit of the x axis of the kinetics plots.
   time_unit <- reactive({
     if (is.null(input$time_unit))
@@ -164,7 +177,8 @@ shinyServer(function(input, output, session){
     plate_layout <- get_layout()$plate_layout
     data <- calculate()
 
-    if ((is.null(plate_layout))||(is.null(data))||(is.null(input$exclude4max)))
+    if ((is.null(plate_layout))||(is.null(data))||(is.null(input$exclude4max))||
+        (!ros_background_fits()))
       return(NULL)
 
     withProgress(message = "Blanking against the controls", value = NULL, {
@@ -217,22 +231,46 @@ shinyServer(function(input, output, session){
                   "time" = data$ms_normdata$time))
     }
 
+    if (!ros_background_fits())
+      return(NULL)
+
     raw_plate_layout <- annotated_wells(plate_layout)
     values <- ros_well_values(data$ms_rawdata, raw_plate_layout,
                               bg_values = ros_background_points(),
-                              how_many_bg_values = ros_background_used())
+                              how_many_bg_values = ros_background_used(),
+                              excluded_wells = excluded_wells())
 
     return(list("values" = values,
                 "time" = seq(-ros_background_points(),
                              nrow(values) - ros_background_points() - 1)))
   })
 
+  # The integration window that is actually used.  The slider that sets it is
+  # rendered into the hidden "Area under Curve" tab, and Shiny suspends an
+  # output whose element is not visible, so input$auc_range does not exist
+  # before that tab has been opened once.  Falling back to the whole
+  # measurement -- the very value the slider starts with -- keeps a download
+  # identical whether or not the tab was ever visited.
+  auc_window <- reactive({
+
+    range <- auc_time_range()
+
+    if (is.null(range))
+      return(NULL)
+
+    if (is.null(input$auc_range))
+      return(c(range[1], range[2]))
+
+    return(input$auc_range)
+  })
+
   auc_calculate <- reactive({
 
     plate_layout <- get_layout()$plate_layout
     wells <- analysis_well_values()
+    window <- auc_window()
 
-    if ((is.null(plate_layout))||(is.null(wells))||(is.null(input$auc_range)))
+    if ((is.null(plate_layout))||(is.null(wells))||(is.null(window)))
       return(NULL)
 
     raw_plate_layout <- annotated_wells(plate_layout)
@@ -247,7 +285,7 @@ shinyServer(function(input, output, session){
     }
 
     auc <- group_auc(wells$values, wells$time, raw_plate_layout,
-                     from = input$auc_range[1], to = input$auc_range[2],
+                     from = window[1], to = window[2],
                      method = method, spread = spread)
 
     if (is.null(auc))
@@ -256,8 +294,8 @@ shinyServer(function(input, output, session){
     reference <- if (isTRUE(nzchar(input$auc_reference))) input$auc_reference else NULL
 
     return(list("auc" = relative_auc(auc, reference),
-                "from" = input$auc_range[1],
-                "to" = input$auc_range[2],
+                "from" = window[1],
+                "to" = window[2],
                 "method" = method,
                 "reference" = reference,
                 "ylabel" = auc_label(input$assay_type, method, reference)))
@@ -301,7 +339,7 @@ shinyServer(function(input, output, session){
       if (length(selected) == 0)
         return(NULL)
       return(data.frame(time = wells$time,
-                        values = rowMeans(wells$values[selected, drop = FALSE]),
+                        values = rowMeans(wells$values[selected]),
                         stringsAsFactors = FALSE))
     }
 
@@ -501,6 +539,13 @@ shinyServer(function(input, output, session){
       return(paste("The ROS assay needs control wells: write 'control' into the",
                    "elicitor column of the wells used for blanking."))
 
+    if ((input$assay_type == 2) && (!ros_background_fits()))
+      return(paste0("The measurement has ", nrow(calculate()$ms_rawdata),
+                    " measurement points, so at most ",
+                    nrow(calculate()$ms_rawdata) + 1,
+                    " of them can be recorded before the elicitation. ",
+                    "Please lower 'Measurement points before elicitation'."))
+
     return(paste("No genotype and elicitor combination of the layout has wells",
                  "in the measurement file. Please check that the well names",
                  "match."))
@@ -637,12 +682,16 @@ shinyServer(function(input, output, session){
       graph_mean <- mean_graphs()
 
       pdf(file, width = 29.7, height = 21.0, paper = "a4r")
+      # A plot that fails while it is drawn must not leave the pdf device
+      # current: every later renderPlot of this R process would go into the
+      # orphaned file instead of the browser.
+      on.exit(dev.off(), add = TRUE)
+
       invisible(print(wellcurves))
       if (is.null(platelayout) == FALSE){invisible(print(platelayout))}
       if (is.null(bar_plots) == FALSE){invisible(print(bar_plots))}
       if (is.null(auc_plots) == FALSE){invisible(print(auc_plots))}
       if (is.null(graph_mean) == FALSE){invisible(print(graph_mean))}
-      dev.off()
     }
   )
 

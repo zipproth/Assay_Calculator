@@ -32,6 +32,39 @@ ros_inputs <- function(...) {
   )
 }
 
+test_that("the background window keeps its off-by-one and stays in the file", {
+  # With 10 points recorded before the elicitation and 5 of them used, the
+  # window covers the points 5 to 9, not 6 to 10.  The asymmetry is what the
+  # original implementation did and the README names it: correcting it would
+  # move every ROS number the app has ever produced.
+  expect_equal(app$background_window(10, 5), 5:9)
+  expect_equal(app$background_window(10, 5, 70), 5:9)
+
+  # The window ends one point before the elicitation, so the last row it reads
+  # is bg_values - 1 and a measurement of 70 points carries at most 71 points
+  # before it.  Beyond that the window used to run past the end of the data:
+  # ros_normalize() indexes a matrix and aborted with "subscript out of
+  # bounds", while ros_well_values() indexes a data frame and silently
+  # returned NA for every well of the plate.
+  expect_equal(app$background_window(71, 5, 70), 66:70)
+  expect_equal(app$background_window(72, 5, 70), 66:70)
+  expect_equal(app$background_window(1000, 5, 70), 66:70)
+  expect_true(all(app$background_window(1000, 1000, 70) %in% 1:70))
+
+  # The number of points used can never push the window out on its own; it is
+  # clamped against the points recorded before the elicitation.
+  expect_equal(app$background_window(10, 1000), 1:9)
+  expect_equal(app$background_window(10, 0), 9L)
+
+  # Fewer than two points before the elicitation leave no window at all.  The
+  # sidebar cannot reach this, but the arithmetic used to produce the row index
+  # 0 for 1, and negative indices below it -- and a negative index does not
+  # select a row, it drops one, so the "background" became the mean of nearly
+  # the whole measurement.
+  expect_equal(app$background_window(1, 5, 70), 1L)
+  expect_equal(app$background_window(0, 5, 70), 1L)
+})
+
 test_that("ROS_calculate is only run for the ROS assay", {
   testServer(APP_DIR, {
     do.call(session$setInputs, ros_inputs(assay_type = "1"))
@@ -76,6 +109,40 @@ test_that("the ROS time axis starts before the elicitation", {
     # 10 background measurement points are numbered -10 .. -1
     expect_equal(unname(ros$normdata[, "time"]), seq(-10, 59))
     expect_equal(rownames(ros$normdata)[1:3], c("-10", "-9", "-8"))
+  })
+})
+
+test_that("a background longer than the measurement is refused, not calculated", {
+  # ROSExample.xlsx has 70 measurement points and "Measurement points before
+  # elicitation" has no upper bound, so 72 is simply typed into the sidebar.
+  # The background window then ended on row 71 and ros_normalize() aborted with
+  # "subscript out of bounds", which turned every ROS output red.
+  testServer(APP_DIR, {
+    do.call(session$setInputs, ros_inputs(ros_bg_points = 71))
+
+    # 71 is the longest background a 70 point measurement can carry: the window
+    # ends on the very last row of the file.
+    expect_true(ros_background_fits())
+    expect_false(is.null(suppressMessages(ROS_calculate())))
+
+    session$setInputs(ros_bg_points = 72)
+    expect_false(ros_background_fits())
+    expect_null(suppressMessages(ROS_calculate()))
+    expect_null(suppressMessages(analysis_well_values()))
+    expect_null(suppressMessages(bar_plots_max()))
+    expect_null(suppressMessages(mean_graphs()))
+  })
+})
+
+test_that("the hint names how many points the measurement can carry", {
+  # The plots fall back to summary_hint() when their data is NULL.  Without a
+  # sentence of its own the hint blamed the well names of the layout for a
+  # background that was only too long.
+  testServer(APP_DIR, {
+    do.call(session$setInputs, ros_inputs(ros_bg_points = 200))
+
+    expect_match(summary_hint(), "70 measurement points", fixed = TRUE)
+    expect_match(summary_hint(), "at most 71", fixed = TRUE)
   })
 })
 

@@ -26,9 +26,25 @@ calculate_data <- function(inputfile, dc, data_type, assay_type, interval = 10){
 
   rawdata <- rawdata[ , mixedsort(names(rawdata))] #this sorts the rawdata for well names, requires gtools
 
+  # Nothing is left once every recorded point is cut off as discharge.  The
+  # slice below would count backwards then and abort deep inside [.data.frame
+  # with "only 0's may be mixed with negative subscripts", so the two ways into
+  # that state are named here instead: an empty file, and a discharge setting
+  # that is not smaller than the measurement.
+  if (nrow(rawdata) == 0)
+    stop(paste0("The measurement file contains no measurement points, ",
+                "only the well names. Please paste your measurement below ",
+                "the well names of the data template."))
+
+  if (nrow(rawdata) <= dc)
+    stop(paste0("The measurement file contains ", nrow(rawdata),
+                " measurement points, and the last ", dc,
+                " of them are cut off as discharge. Please lower ",
+                "\"Discharge measurement points\" in the sidebar."))
+
   normdata <- colwise(norm.well)(rawdata, interval = interval) # colwise needs library(plyr)
-  ms_rawdata <- rawdata[1:(nrow(rawdata)-dc),] # isolates MS values of raw data
-  ms_normdata <- normdata[1:(nrow(normdata)-dc),] # isolates MS values of normalized data
+  ms_rawdata <- rawdata[seq_len(nrow(rawdata)-dc),] # isolates MS values of raw data
+  ms_normdata <- normdata[seq_len(nrow(normdata)-dc),] # isolates MS values of normalized data
   ms_normdata[is.nan(colSums(ms_normdata))] <- 0 #first replace all colSums resulting in NaNs with zeros
 
   ms_rawdata$time <- measurement_time(nrow(ms_rawdata), interval)
@@ -236,8 +252,14 @@ interleave_with_spread <- function(values, spread, time = NULL){
 # the mean of the control wells of its own genotype and then corrected for its
 # own background.  Averaging these wells per group reproduces the mean curves
 # of ros_normalize() exactly.
+#
+# An excluded well keeps its column and is only dropped from the control mean,
+# exactly as ros_normalize() drops it from its control group.  Both paths then
+# blank against the same wells; which columns reach a result is the caller's
+# decision.
 ros_well_values <- function(rawdata, raw_plate_layout,
-                            bg_values = 10, how_many_bg_values = 5){
+                            bg_values = 10, how_many_bg_values = 5,
+                            excluded_wells = NULL){
   wells <- raw_plate_layout$well[raw_plate_layout$well %in% colnames(rawdata)]
   values <- rawdata[wells]
 
@@ -245,6 +267,7 @@ ros_well_values <- function(rawdata, raw_plate_layout,
     control_wells <- raw_plate_layout$well[raw_plate_layout$genotype == gen &
                                            raw_plate_layout$elicitor == "control"]
     control_wells <- control_wells[control_wells %in% colnames(values)]
+    control_wells <- control_wells[!(control_wells %in% excluded_wells)]
     if(length(control_wells) == 0) next
 
     blank <- rowMeans(values[control_wells])
@@ -254,7 +277,7 @@ ros_well_values <- function(rawdata, raw_plate_layout,
     values[genotype_wells] <- values[genotype_wells] - blank
   }
 
-  background_rows <- background_window(bg_values, how_many_bg_values)
+  background_rows <- background_window(bg_values, how_many_bg_values, nrow(values))
   background <- colMeans(values[background_rows, , drop = FALSE])
   values <- as.data.frame(sweep(as.matrix(values), 2, background))
 
@@ -268,7 +291,15 @@ ros_well_values <- function(rawdata, raw_plate_layout,
 # it covers the points 5 to 9, not 6 to 10.  That is how the original
 # implementation behaved and it is kept deliberately, so that switching to
 # this version does not silently move every ROS result.
-background_window <- function(bg_values, how_many_bg_values){
+#
+# n_rows is the length of the measurement the window is going to index into.
+# The window can never leave that measurement: it ends on the last row of the
+# data at the latest and starts at row 1 at the earliest.  The reactive layer
+# refuses a background that does not fit before any of this is reached, so the
+# clamp here is the invariant of the function, not the place where the user is
+# answered.
+background_window <- function(bg_values, how_many_bg_values, n_rows = Inf){
+  bg_values <- max(2, min(bg_values, n_rows + 1))
   how_many_bg_values <- max(1, min(how_many_bg_values, bg_values - 1))
   return((bg_values - how_many_bg_values):(bg_values - 1))
 }
@@ -325,7 +356,7 @@ ros_normalize <- function(rawdata, plate_layout, exclude4max = 4,
   }
 
   # 2 subtract the background of the measurement points before the elicitation
-  background_rows <- background_window(bg_values, how_many_bg_values)
+  background_rows <- background_window(bg_values, how_many_bg_values, nrow(normdata))
   background <- colMeans(normdata[background_rows, , drop = FALSE])
   normdata <- sweep(normdata, 2, background)
 

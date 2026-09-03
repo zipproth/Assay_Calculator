@@ -128,6 +128,42 @@ test_that("the per well ROS values average to the published mean curves", {
   })
 })
 
+test_that("the per well ROS values follow an excluded control well", {
+  # A control well is the blank of its genotype, and ros_normalize() drops an
+  # excluded one from that blank.  ros_well_values() kept blanking against every
+  # control well of the plate, so excluding a control well moved the maxima
+  # while the areas stayed on the old blank: the mean curves and the areas of
+  # the same download no longer belonged to each other.  The averaged wells have
+  # to reproduce the published curves with an exclusion as well.
+  layout <- app$read_plate_layout(example_upload("ROSExample_layout.xlsx"))
+  raw_plate_layout <- layout$plate_layout[, 1:4]
+  raw_plate_layout <- raw_plate_layout[complete.cases(raw_plate_layout), ]
+
+  testServer(APP_DIR, {
+    do.call(session$setInputs, app_inputs(
+      assay_type = "2",
+      data_file = example_upload("ROSExample.xlsx"),
+      layout_file = example_upload("ROSExample_layout.xlsx"),
+      excluded_wells = "A11"           # a control well of genotype1
+    ))
+    published <- suppressMessages(ROS_calculate())$normdata
+    wells <- analysis_well_values()$values
+
+    for (group in colnames(published)[-1]) {
+      genotype <- sub(" .*", "", group)
+      elicitor <- sub("^[^ ]+ ", "", group)
+      group_wells <- raw_plate_layout$well[
+        raw_plate_layout$genotype == genotype &
+          raw_plate_layout$elicitor == elicitor]
+      group_wells <- setdiff(group_wells, "A11")
+      expect_equal(unname(rowMeans(wells[group_wells])),
+                   unname(published[, group]),
+                   tolerance = 1e-9,
+                   info = group)
+    }
+  })
+})
+
 test_that("the calcium areas are calculated over the selected window", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
@@ -203,6 +239,45 @@ test_that("the ROS areas skip the control wells", {
   })
 })
 
+test_that("the ROS well values survive a background longer than the file", {
+  # ros_well_values() takes the other path into background_window(): it indexes
+  # a data frame, and reading past its last row does not raise an error, it
+  # yields NA rows.  The background was then NA for every well and so was every
+  # area; group_auc() dropped them all and the bar plot vanished behind the
+  # hint about mismatched well names.
+  data <- app$calculate_data(example_upload("ROSExample.xlsx"), 0, "2", "2")
+  layout <- app$read_plate_layout(example_upload("ROSExample_layout.xlsx"))
+  raw_plate_layout <- app$annotated_wells(layout$plate_layout)
+
+  fits <- app$ros_well_values(data$ms_rawdata, raw_plate_layout, bg_values = 71)
+  too_long <- app$ros_well_values(data$ms_rawdata, raw_plate_layout,
+                                  bg_values = 72)
+
+  expect_false(any(is.na(as.matrix(fits))))
+  expect_false(any(is.na(as.matrix(too_long))))
+  # The clamp lands on the longest window that fits; it does not invent one.
+  expect_equal(too_long, fits)
+})
+
+test_that("no ROS areas are calculated when the background does not fit", {
+  # The refusal has to reach this path as well, otherwise the areas would be
+  # calculated from a shortened background while the kinetics and the maxima of
+  # the same plate report nothing.
+  testServer(APP_DIR, {
+    do.call(session$setInputs, app_inputs(
+      assay_type = "2",
+      data_file = example_upload("ROSExample.xlsx"),
+      layout_file = example_upload("ROSExample_layout.xlsx"),
+      auc_rotation = "1", auc_columns = "1", auc_method = "trapezoid",
+      auc_range = c(-10, 59), ros_bg_points = 72, ros_bg_used = 5
+    ))
+
+    expect_null(suppressMessages(analysis_well_values()))
+    expect_null(suppressMessages(auc_calculate()))
+    expect_null(suppressMessages(bar_plots_auc()))
+  })
+})
+
 test_that("the area bar plot is built from the calculated areas", {
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
@@ -236,12 +311,27 @@ test_that("no areas are calculated without a layout", {
   })
 })
 
-test_that("no areas are calculated before the window slider exists", {
+test_that("the integration window defaults to the whole measurement", {
+  # The slider that sets the window is rendered into the "Area under Curve"
+  # tab, and Shiny suspends an output while its element is hidden, so
+  # input$auc_range does not exist before that tab has been opened once.  That
+  # used to make auc_calculate() return NULL, and every download then quietly
+  # lost its area sheet, its area plot and its window in the settings.  The
+  # default is the value the slider itself starts with, so opening the tab
+  # changes no number.
   testServer(APP_DIR, {
     do.call(session$setInputs, app_inputs(
       data_file = example_upload("CaExample.xlsx"),
       layout_file = example_upload("CaExample_layout.xlsx")
     ))
-    expect_null(auc_calculate())
+
+    defaulted <- auc_calculate()
+    expect_equal(c(defaulted$from, defaulted$to), auc_time_range()[1:2])
+    expect_equal(defaulted$from, 0)
+    expect_equal(defaulted$to, 1910)
+    expect_equal(nrow(defaulted$auc), 28L)
+
+    session$setInputs(auc_range = c(0, 1910))
+    expect_equal(auc_calculate()$auc$values, defaulted$auc$values)
   })
 })

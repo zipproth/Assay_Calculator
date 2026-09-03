@@ -2,6 +2,8 @@
 # every data set the plots and the Excel export are built from.  The expected
 # numbers below were recorded from the example files shipped with the app.
 
+library(shiny)
+
 ca <- app$calculate_data(example_upload("CaExample.xlsx"), 15, "2", "1")
 ros <- app$calculate_data(example_upload("ROSExample.xlsx"), 0, "2", "2")
 
@@ -24,6 +26,62 @@ test_that("the discharge measurement points are cut off", {
   full <- app$calculate_data(example_upload("CaExample.xlsx"), 0, "2", "1")
   expect_equal(nrow(full$ms_rawdata), 207L)
   expect_equal(nrow(ca$ms_rawdata), 192L)
+})
+
+test_that("the empty data template is refused with a message about the template", {
+  # Datatemplate.xlsx is offered for download on the Instructions tab and
+  # carries the 96 well names without a single measurement point.  Uploading it
+  # unchanged aborted in [.data.frame with "only 0's may be mixed with negative
+  # subscripts", because 1:(0 - 15) counts backwards.
+  template <- example_upload("Datatemplate.xlsx")
+  expect_equal(dim(app$read_measurement_file(template)), c(0L, 96L))
+
+  expect_error(app$calculate_data(template, 15, "2", "1"),
+               "contains no measurement points")
+
+  # The ROS assay reads with dc = 0, where 1:(0 - 0) is c(1, 0).  That did not
+  # abort at all: it produced one row of NAs and carried that fabricated
+  # measurement point into the plots and the export.
+  expect_error(app$calculate_data(template, 0, "2", "2"),
+               "contains no measurement points")
+})
+
+test_that("a measurement shorter than the discharge setting names the slider", {
+  # The discharge slider goes up to 20 points, so a short pilot measurement
+  # reaches the same backwards slice with a file that is not empty at all.
+  dir <- new_temp_dir()
+  path <- file.path(dir, "short.csv")
+  write.csv(app$read_measurement_file(example_upload("CaExample.xlsx"))[1:15, ],
+            path, row.names = FALSE)
+  short <- data.frame(name = "short.csv", size = file.size(path), type = "",
+                      datapath = path, stringsAsFactors = FALSE)
+
+  # As many discharge points as measurement points did not abort either:
+  # 1:(15 - 15) is c(1, 0), so the app cut the whole measurement away and then
+  # plotted its very first point as the entire result.
+  expect_error(app$calculate_data(short, 15, "2", "1"),
+               "15 measurement points, and the last 15")
+  # One point further the index runs backwards and [.data.frame aborts.
+  expect_error(app$calculate_data(short, 16, "2", "1"),
+               "15 measurement points, and the last 16")
+
+  # One point more than the discharge setting is the shortest measurement that
+  # still yields a result, and its single time stamp is 0.
+  shortest <- app$calculate_data(short, 14, "2", "1")
+  expect_equal(nrow(shortest$ms_rawdata), 1L)
+  expect_equal(shortest$ms_rawdata$time, 0)
+})
+
+test_that("uploading the data template does not break the app", {
+  # The same path through the reactive layer: the user downloads the template
+  # on the Instructions tab and uploads it again without filling it in, with
+  # the discharge slider left at its default of 15.
+  testServer(APP_DIR, {
+    do.call(session$setInputs, app_inputs(
+      data_file = example_upload("Datatemplate.xlsx")
+    ))
+    expect_error(calculate(), "contains no measurement points")
+  })
 })
 
 test_that("raw and normalized values of the calcium example are unchanged", {
